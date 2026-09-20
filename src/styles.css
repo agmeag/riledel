@@ -53,7 +53,7 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .circle.delete { color: #ff675f; }
 .circle.details { width: 42px; height: 42px; font: 600 17px Georgia; color: #9ba19d; }
 .circle.keep { color: #d5ff40; border-color: #637323; background: #202718; }
-.undo { position: fixed; z-index: 12; left: 14px; right: 14px; bottom: max(104px, calc(env(safe-area-inset-bottom) + 88px)); display: flex; justify-content: space-between; align-items: center; min-height: 54px; border: 0; border-radius: 14px; padding: 10px 14px; background: #d5ff40; color: #11150d; box-shadow: 0 16px 38px #000a; }
+.undo { position: fixed; z-index: 100; left: max(14px, env(safe-area-inset-left)); right: max(14px, env(safe-area-inset-right)); bottom: max(104px, calc(env(safe-area-inset-bottom) + 88px)); display: flex; justify-content: space-between; align-items: center; min-height: 58px; border: 0; border-radius: 14px; padding: 10px 14px; background: #d5ff40; color: #11150d; box-shadow: 0 16px 38px #000a; animation: undo-enter .22s cubic-bezier(.16, 1, .3, 1); }
 .undo strong { font-size: 14px; }
 .undo span { color: #3f491d; font-size: 12px; }
 .zoom-reset { position: absolute; z-index: 3; top: 14px; right: 14px; min-height: 40px; border: 0; border-radius: 99px; padding: 8px 12px; background: #f4f4f0; color: #11150d; font-size: 12px; font-weight: 700; }
@@ -69,3 +69,5 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .sheet dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
 @media (min-width: 700px) { .review { width: 430px; margin: auto; border-inline: 1px solid #242826; } body { background: #050606; } }
 @media (pointer: coarse) { .tags button { min-height: 44px; } }
+@keyframes undo-enter { from { transform: translateY(18px); opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .undo { animation: none; } }

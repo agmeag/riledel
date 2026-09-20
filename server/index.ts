@@ -32,7 +32,7 @@ const mimeTypes: Record<string, string> = {
   '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.ogv': 'video/ogg'
 }
-const categories = new Set(['family', 'work', 'inspiration', 'game', 'personal', 'pets', 'documents'])
+const categories = new Set(['reanalyze', 'friends', 'besto_friend', 'family', 'work', 'inspiration', 'game', 'personal', 'pets', 'documents'])
 let files: MediaFile[] = []
 let sourceRoot: string | undefined
 let operations: Operation[] = []
@@ -247,11 +247,12 @@ app.post<{ Params: { id: string }; Body: { destination: 'keep' | 'delete'; categ
   if (request.body.destination === 'keep') segments.push(`_${category ?? 'uncategorized'}`)
   const destination = await uniqueDestination(path.join(...segments), file)
   await rename(file.absolutePath, destination)
-  const operation = { id: randomBytes(8).toString('hex'), source: file.absolutePath, destination, expiresAt: Date.now() + 10_000 }
+  const undoForMs = 15_000
+  const operation = { id: randomBytes(8).toString('hex'), source: file.absolutePath, destination, expiresAt: Date.now() + undoForMs }
   operations = [operation, ...operations].slice(0, 10)
   files = files.filter(candidate => candidate.id !== file.id)
   await setPending()
-  return { operationId: operation.id, undoUntil: operation.expiresAt, next: files[0] ? publicFile(files[0]) : null, remaining: files.length }
+  return { operationId: operation.id, undoForMs, next: files[0] ? publicFile(files[0]) : null, remaining: files.length }
 })
 
 app.post<{ Params: { id: string } }>('/api/operations/:id/undo', async request => {

@@ -11,7 +11,18 @@ type MediaFile = {
   contentUrl: string
 }
 
-const categories = ['family', 'work', 'inspiration', 'game', 'personal', 'pets', 'documents']
+const categories = [
+  { value: 'reanalyze', label: 'Decide later' },
+  { value: 'friends', label: '_friends' },
+  { value: 'besto_friend', label: '_besto_friend' },
+  { value: 'family', label: '_family' },
+  { value: 'work', label: '_work' },
+  { value: 'inspiration', label: '_inspiration' },
+  { value: 'game', label: '_game' },
+  { value: 'personal', label: '_personal' },
+  { value: 'pets', label: '_pets' },
+  { value: 'documents', label: '_documents' }
+]
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } })
@@ -41,7 +52,7 @@ export default function App() {
   const [category, setCategory] = useState<string>()
   const [details, setDetails] = useState(false)
   const [error, setError] = useState<string>()
-  const [undo, setUndo] = useState<{ id: string; expiresAt: number }>()
+  const [undo, setUndo] = useState<{ id: string }>()
   const [drag, setDrag] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 })
   const start = useRef<{ mode: 'swipe' | 'pan'; x: number; y: number; panX: number; panY: number } | undefined>(undefined)
@@ -96,15 +107,15 @@ export default function App() {
     if (!current || working) return
     setWorking(true); setError(undefined)
     try {
-      const result = await api<{ operationId: string; undoUntil: number; next: MediaFile | null; remaining: number }>(`/api/files/${current.id}/move`, {
+      const result = await api<{ operationId: string; undoForMs: number; next: MediaFile | null; remaining: number }>(`/api/files/${current.id}/move`, {
         method: 'POST', body: JSON.stringify({ destination, category: destination === 'keep' ? selectedCategory : undefined })
       })
       const nextFiles = files.slice(1)
       if (result.next && !nextFiles.some(file => file.id === result.next?.id)) nextFiles.unshift(result.next)
       setFiles(nextFiles); setTotal(result.remaining); setCategory(undefined); setDetails(false); setDrag({ x: 0, y: 0 })
-      setUndo({ id: result.operationId, expiresAt: result.undoUntil })
+      setUndo({ id: result.operationId })
       window.clearTimeout(undoTimer.current)
-      undoTimer.current = window.setTimeout(() => setUndo(undefined), Math.max(0, result.undoUntil - Date.now()))
+      undoTimer.current = window.setTimeout(() => setUndo(undefined), result.undoForMs)
     } catch (value) { catchError(value); setDrag({ x: 0, y: 0 }) }
     finally { setWorking(false) }
   }
@@ -214,7 +225,7 @@ export default function App() {
         {root && <button className="subtle" disabled={loading || scanning} onClick={() => void begin(true)}>Start from beginning</button>}
         {error && <p className="error">{error}</p>}
       </section>
-      {undo && <button className="undo" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file</span></button>}
+      {undo && <button className="undo" role="status" aria-live="polite" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file · 15 seconds</span></button>}
     </main>
   }
 
@@ -254,7 +265,7 @@ export default function App() {
 
     <section className="tags" aria-label="Keep category">
       <span>Keep in</span>
-      {categories.map(item => <button key={item} disabled={working} onClick={() => void move('keep', item)}>_{item}</button>)}
+      {categories.map(item => <button key={item.value} disabled={working} onClick={() => void move('keep', item.value)}>{item.label}</button>)}
     </section>
 
     <nav className="actions">
@@ -264,7 +275,7 @@ export default function App() {
       <button className="circle keep" onClick={() => void move('keep')} aria-label="Keep">✓</button>
     </nav>
 
-    {undo && <button className="undo" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file</span></button>}
+    {undo && <button className="undo" role="status" aria-live="polite" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file · 15 seconds</span></button>}
     {error && <div className="toast error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
 
     {details && current && <div className="sheet-backdrop" onClick={() => setDetails(false)}>
