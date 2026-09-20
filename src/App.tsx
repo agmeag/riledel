@@ -25,7 +25,9 @@ const categories = [
 ]
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } })
+  const headers = new Headers(options?.headers)
+  if (options?.body) headers.set('Content-Type', 'application/json')
+  const response = await fetch(url, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string } | null
     throw new Error(body?.message ?? `Request failed (${response.status})`)
@@ -212,7 +214,7 @@ export default function App() {
     setDrag({ x: 0, y: 0 })
   }
 
-  if (!current && !total) {
+  if (!current && !total && !undo) {
     return <main className="setup">
       <section className="setup-card">
         <div className="brand"><span>F</span> filedele</div>
@@ -225,15 +227,19 @@ export default function App() {
         {root && <button className="subtle" disabled={loading || scanning} onClick={() => void begin(true)}>Start from beginning</button>}
         {error && <p className="error">{error}</p>}
       </section>
-      {undo && <button className="undo" role="status" aria-live="polite" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file · 15 seconds</span></button>}
     </main>
   }
 
   return <main className="review">
     <header>
       <div className="brand"><span>F</span> filedele</div>
-      <div className="count"><strong>{total}</strong> {scanning ? 'found · scanning' : 'left'}</div>
+      <div className="header-actions">
+        {undo && <button className="undo" onClick={() => void undoMove()} aria-label="Undo the last file move">Undo</button>}
+        <div className="count"><strong>{total}</strong> {scanning ? 'found · scanning' : 'left'}</div>
+      </div>
     </header>
+
+    {!current && <section className="review-empty"><strong>All reviewed</strong><span>You can still undo the last move.</span></section>}
 
     {current && <section className="stage">
       <div className={`intent delete-intent ${drag.x < -20 ? 'visible' : ''}`}><b>DELETE</b><small>move to review bin</small></div>
@@ -263,19 +269,18 @@ export default function App() {
       </article>
     </section>}
 
-    <section className="tags" aria-label="Keep category">
+    {current && <section className="tags" aria-label="Keep category">
       <span>Keep in</span>
       {categories.map(item => <button key={item.value} disabled={working} onClick={() => void move('keep', item.value)}>{item.label}</button>)}
-    </section>
+    </section>}
 
-    <nav className="actions">
+    {current && <nav className="actions">
       <button className="circle destructive" onClick={() => void hardDelete()} aria-label="Delete permanently">⌫</button>
       <button className="circle delete" onClick={() => void move('delete')} aria-label="Move to delete">×</button>
       <button className="circle details" onClick={() => setDetails(true)} aria-label="Show details">i</button>
       <button className="circle keep" onClick={() => void move('keep')} aria-label="Keep">✓</button>
-    </nav>
+    </nav>}
 
-    {undo && <button className="undo" role="status" aria-live="polite" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file · 15 seconds</span></button>}
     {error && <div className="toast error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
 
     {details && current && <div className="sheet-backdrop" onClick={() => setDetails(false)}>

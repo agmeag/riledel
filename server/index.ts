@@ -247,7 +247,7 @@ app.post<{ Params: { id: string }; Body: { destination: 'keep' | 'delete'; categ
   if (request.body.destination === 'keep') segments.push(`_${category ?? 'uncategorized'}`)
   const destination = await uniqueDestination(path.join(...segments), file)
   await rename(file.absolutePath, destination)
-  const undoForMs = 15_000
+  const undoForMs = 5_000
   const operation = { id: randomBytes(8).toString('hex'), source: file.absolutePath, destination, expiresAt: Date.now() + undoForMs }
   operations = [operation, ...operations].slice(0, 10)
   files = files.filter(candidate => candidate.id !== file.id)
