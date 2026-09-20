@@ -1,0 +1,5 @@
+node_modules
+dist
+.filedele-state.json
+.DS_Store
+*.log
