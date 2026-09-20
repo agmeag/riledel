@@ -35,6 +35,7 @@ export default function App() {
   const [root, setRoot] = useState('')
   const [volumes, setVolumes] = useState<string[]>([])
   const [total, setTotal] = useState(0)
+  const [scanning, setScanning] = useState(false)
   const [loading, setLoading] = useState(true)
   const [working, setWorking] = useState(false)
   const [category, setCategory] = useState<string>()
@@ -42,9 +43,18 @@ export default function App() {
   const [error, setError] = useState<string>()
   const [undo, setUndo] = useState<{ id: string; expiresAt: number }>()
   const [drag, setDrag] = useState({ x: 0, y: 0 })
-  const start = useRef<{ x: number; y: number } | undefined>(undefined)
+  const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 })
+  const start = useRef<{ mode: 'swipe' | 'pan'; x: number; y: number; panX: number; panY: number } | undefined>(undefined)
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<{ distance: number; scale: number; centerX: number; centerY: number; panX: number; panY: number } | undefined>(undefined)
   const undoTimer = useRef<number | undefined>(undefined)
   const current = files[0]
+
+  useEffect(() => {
+    setZoom({ scale: 1, x: 0, y: 0 })
+    setDrag({ x: 0, y: 0 })
+    pointers.current.clear()
+  }, [current?.id])
 
   useEffect(() => {
     api<{ volumes: string[]; previousRoot: string | null }>('/api/volumes')
@@ -53,6 +63,20 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (!scanning) return
+    const poll = window.setInterval(() => {
+      api<{ total: number; files: MediaFile[]; scanning: boolean }>('/api/files')
+        .then(result => {
+          setTotal(result.total)
+          setFiles(result.files)
+          setScanning(result.scanning)
+        })
+        .catch(catchError)
+    }, 500)
+    return () => window.clearInterval(poll)
+  }, [scanning])
+
   function catchError(value: unknown) {
     setError(value instanceof Error ? value.message : 'Something went wrong')
   }
@@ -60,20 +84,20 @@ export default function App() {
   async function begin(restart = false) {
     setLoading(true); setError(undefined)
     try {
-      const result = await api<{ root: string; total: number; files: MediaFile[] }>('/api/session', {
+      const result = await api<{ root: string; total: number; files: MediaFile[]; scanning: boolean }>('/api/session', {
         method: 'POST', body: JSON.stringify({ root, restart })
       })
-      setRoot(result.root); setTotal(result.total); setFiles(result.files)
+      setRoot(result.root); setTotal(result.total); setFiles(result.files); setScanning(result.scanning)
     } catch (value) { catchError(value) }
     finally { setLoading(false) }
   }
 
-  async function move(destination: 'keep' | 'delete') {
+  async function move(destination: 'keep' | 'delete', selectedCategory = category) {
     if (!current || working) return
     setWorking(true); setError(undefined)
     try {
       const result = await api<{ operationId: string; undoUntil: number; next: MediaFile | null; remaining: number }>(`/api/files/${current.id}/move`, {
-        method: 'POST', body: JSON.stringify({ destination, category: destination === 'keep' ? category : undefined })
+        method: 'POST', body: JSON.stringify({ destination, category: destination === 'keep' ? selectedCategory : undefined })
       })
       const nextFiles = files.slice(1)
       if (result.next && !nextFiles.some(file => file.id === result.next?.id)) nextFiles.unshift(result.next)
@@ -109,17 +133,61 @@ export default function App() {
 
   function pointerDown(event: React.PointerEvent) {
     if (working || details) return
-    start.current = { x: event.clientX, y: event.clientY }
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     event.currentTarget.setPointerCapture(event.pointerId)
+    if (current?.kind === 'image' && pointers.current.size === 2) {
+      const [first, second] = [...pointers.current.values()]
+      pinch.current = {
+        distance: Math.hypot(second.x - first.x, second.y - first.y),
+        scale: zoom.scale,
+        centerX: (first.x + second.x) / 2,
+        centerY: (first.y + second.y) / 2,
+        panX: zoom.x,
+        panY: zoom.y
+      }
+      start.current = undefined
+      return
+    }
+    start.current = { mode: zoom.scale > 1 ? 'pan' : 'swipe', x: event.clientX, y: event.clientY, panX: zoom.x, panY: zoom.y }
   }
 
   function pointerMove(event: React.PointerEvent) {
-    if (!start.current || working || details) return
-    setDrag({ x: event.clientX - start.current.x, y: event.clientY - start.current.y })
+    if (working || details || !pointers.current.has(event.pointerId)) return
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (current?.kind === 'image' && pointers.current.size >= 2 && pinch.current) {
+      const [first, second] = [...pointers.current.values()]
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      const centerX = (first.x + second.x) / 2
+      const centerY = (first.y + second.y) / 2
+      const scale = Math.min(5, Math.max(1, pinch.current.scale * distance / Math.max(1, pinch.current.distance)))
+      setZoom({
+        scale,
+        x: scale === 1 ? 0 : pinch.current.panX + centerX - pinch.current.centerX,
+        y: scale === 1 ? 0 : pinch.current.panY + centerY - pinch.current.centerY
+      })
+      return
+    }
+    if (!start.current) return
+    if (start.current.mode === 'pan') {
+      setZoom(value => ({ ...value, x: start.current!.panX + event.clientX - start.current!.x, y: start.current!.panY + event.clientY - start.current!.y }))
+    } else {
+      setDrag({ x: event.clientX - start.current.x, y: event.clientY - start.current.y })
+    }
   }
 
-  function pointerUp() {
+  function pointerUp(event: React.PointerEvent) {
+    pointers.current.delete(event.pointerId)
+    if (pinch.current) {
+      if (pointers.current.size < 2) pinch.current = undefined
+      start.current = undefined
+      setDrag({ x: 0, y: 0 })
+      return
+    }
     if (!start.current) return
+    if (start.current.mode === 'pan') {
+      start.current = undefined
+      return
+    }
     const widthThreshold = window.innerWidth * 0.28
     if (drag.x > widthThreshold) void move('keep')
     else if (drag.x < -widthThreshold) void move('delete')
@@ -128,26 +196,32 @@ export default function App() {
     start.current = undefined
   }
 
+  function toggleZoom() {
+    setZoom(value => value.scale > 1 ? { scale: 1, x: 0, y: 0 } : { scale: 2.5, x: 0, y: 0 })
+    setDrag({ x: 0, y: 0 })
+  }
+
   if (!current && !total) {
     return <main className="setup">
       <section className="setup-card">
         <div className="brand"><span>F</span> filedele</div>
-        <h1>{loading ? 'Finding your drives…' : files.length === 0 && root ? 'All clear.' : 'Choose what to clean.'}</h1>
-        <p>Review your media locally. Nothing leaves this computer.</p>
+        <h1>{loading ? 'Finding your drives…' : scanning ? 'Finding the first file…' : files.length === 0 && root ? 'All clear.' : 'Choose what to clean.'}</h1>
+        <p>{scanning ? 'You can start as soon as media appears. The rest will continue scanning.' : 'Review your media locally. Nothing leaves this computer.'}</p>
         <label>Folder on your SSD</label>
         <input value={root} onChange={event => setRoot(event.target.value)} placeholder="/Volumes/My SSD" />
         {volumes.length > 0 && <div className="volume-list">{volumes.map(volume => <button key={volume} onClick={() => setRoot(volume)}>{volume}</button>)}</div>}
-        <button className="primary" disabled={!root || loading} onClick={() => void begin()}>{loading ? 'Scanning…' : root && total === 0 ? 'Scan again' : 'Start reviewing'}</button>
-        {root && <button className="subtle" disabled={loading} onClick={() => void begin(true)}>Start from beginning</button>}
+        <button className="primary" disabled={!root || loading || scanning} onClick={() => void begin()}>{loading || scanning ? 'Scanning…' : root && total === 0 ? 'Scan again' : 'Start reviewing'}</button>
+        {root && <button className="subtle" disabled={loading || scanning} onClick={() => void begin(true)}>Start from beginning</button>}
         {error && <p className="error">{error}</p>}
       </section>
+      {undo && <button className="undo" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file</span></button>}
     </main>
   }
 
   return <main className="review">
     <header>
       <div className="brand"><span>F</span> filedele</div>
-      <div className="count"><strong>{total}</strong> left</div>
+      <div className="count"><strong>{total}</strong> {scanning ? 'found · scanning' : 'left'}</div>
     </header>
 
     {current && <section className="stage">
@@ -160,19 +234,27 @@ export default function App() {
       >
         <div className="media-frame">
           {current.kind === 'image'
-            ? <img src={current.contentUrl} alt={current.name} draggable={false} />
+            ? <img
+                src={current.contentUrl}
+                alt={current.name}
+                draggable={false}
+                onDoubleClick={toggleZoom}
+                style={{ transform: `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})` }}
+              />
             : <video src={current.contentUrl} controls playsInline preload="metadata" onPointerDown={event => event.stopPropagation()} />}
           <div className="top-badges">
             <span>{current.kind}</span>
             {current.duplicateCount > 1 && <span className="duplicate">{current.duplicateCount} same-name files</span>}
           </div>
           <div className="file-caption"><strong>{current.name}</strong><small>{current.relativePath}</small></div>
+          {current.kind === 'image' && zoom.scale > 1 && <button className="zoom-reset" onPointerDown={event => event.stopPropagation()} onClick={toggleZoom}>Reset zoom · {zoom.scale.toFixed(1)}×</button>}
         </div>
       </article>
     </section>}
 
     <section className="tags" aria-label="Keep category">
-      {categories.map(item => <button className={category === item ? 'selected' : ''} key={item} onClick={() => setCategory(category === item ? undefined : item)}>_{item}</button>)}
+      <span>Keep in</span>
+      {categories.map(item => <button key={item} disabled={working} onClick={() => void move('keep', item)}>_{item}</button>)}
     </section>
 
     <nav className="actions">
@@ -182,7 +264,7 @@ export default function App() {
       <button className="circle keep" onClick={() => void move('keep')} aria-label="Keep">✓</button>
     </nav>
 
-    {undo && <button className="undo" onClick={() => void undoMove()}>Moved · Undo</button>}
+    {undo && <button className="undo" onClick={() => void undoMove()}><strong>Undo move</strong><span>Restore the last file</span></button>}
     {error && <div className="toast error">{error}<button onClick={() => setError(undefined)}>×</button></div>}
 
     {details && current && <div className="sheet-backdrop" onClick={() => setDetails(false)}>

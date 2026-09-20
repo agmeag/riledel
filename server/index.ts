@@ -2,7 +2,7 @@ import Fastify from 'fastify'
 import fastifyStatic from '@fastify/static'
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, open, opendir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, opendir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,6 +36,8 @@ const categories = new Set(['family', 'work', 'inspiration', 'game', 'personal',
 let files: MediaFile[] = []
 let sourceRoot: string | undefined
 let operations: Operation[] = []
+let scanning = false
+let scanGeneration = 0
 
 function httpError(statusCode: number, message: string) {
   return Object.assign(new Error(message), { statusCode })
@@ -61,11 +63,43 @@ function idFor(filePath: string, device: number, inode: number | bigint) {
   return createHash('sha256').update(`${device}:${inode}:${filePath}`).digest('hex').slice(0, 24)
 }
 
-async function scan(root: string) {
+async function mediaFromPath(root: string, absolutePath: string, name = path.basename(absolutePath)) {
+  const extension = path.extname(name).toLocaleLowerCase()
+  const kind = imageExtensions.has(extension) ? 'image' : videoExtensions.has(extension) ? 'video' : undefined
+  if (!kind) return null
+  const details = await stat(absolutePath)
+  if (!details.isFile()) return null
+  return {
+    id: idFor(absolutePath, details.dev, details.ino),
+    name,
+    logicalName: logicalName(name),
+    relativePath: path.relative(root, absolutePath),
+    absolutePath,
+    kind,
+    size: details.size,
+    modifiedAt: details.mtime.toISOString(),
+    duplicateCount: 1
+  } satisfies MediaFile
+}
+
+function addScannedFile(file: MediaFile) {
+  if (files.some(candidate => candidate.id === file.id)) return
+  const matches = files.filter(candidate => candidate.logicalName === file.logicalName)
+  file.duplicateCount = matches.length + 1
+  for (const match of matches) match.duplicateCount = file.duplicateCount
+  files.push(file)
+}
+
+async function scan(root: string, generation?: number) {
   const found: MediaFile[] = []
   async function walk(directory: string) {
-    const entries = await opendir(directory)
-    for await (const entry of entries) {
+    if (generation !== undefined && generation !== scanGeneration) return
+    const directoryHandle = await opendir(directory)
+    const entries = []
+    for await (const entry of directoryHandle) entries.push(entry)
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const entry of entries) {
+      if (generation !== undefined && generation !== scanGeneration) return
       if (entry.name === '.filedele' || entry.name === '.DS_Store') continue
       const absolutePath = path.join(directory, entry.name)
       if (entry.isSymbolicLink()) continue
@@ -74,29 +108,38 @@ async function scan(root: string) {
         continue
       }
       if (!entry.isFile()) continue
-      const extension = path.extname(entry.name).toLocaleLowerCase()
-      const kind = imageExtensions.has(extension) ? 'image' : videoExtensions.has(extension) ? 'video' : undefined
-      if (!kind) continue
-      const details = await stat(absolutePath)
-      found.push({
-        id: idFor(absolutePath, details.dev, details.ino),
-        name: entry.name,
-        logicalName: logicalName(entry.name),
-        relativePath: path.relative(root, absolutePath),
-        absolutePath,
-        kind,
-        size: details.size,
-        modifiedAt: details.mtime.toISOString(),
-        duplicateCount: 0
-      })
+      try {
+        const file = await mediaFromPath(root, absolutePath, entry.name)
+        if (!file) continue
+        if (generation === undefined) found.push(file)
+        else addScannedFile(file)
+      } catch (error) {
+        app.log.warn({ error, absolutePath }, 'Skipped unreadable file')
+      }
     }
   }
   await walk(root)
+  if (generation !== undefined) return []
   const counts = new Map<string, number>()
   for (const file of found) counts.set(file.logicalName, (counts.get(file.logicalName) ?? 0) + 1)
   for (const file of found) file.duplicateCount = counts.get(file.logicalName) ?? 1
-  found.sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt) || a.name.localeCompare(b.name) || a.relativePath.localeCompare(b.relativePath))
+  found.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
   return found
+}
+
+async function startProgressiveScan(root: string, resumePath?: string) {
+  const generation = ++scanGeneration
+  files = []
+  scanning = true
+  if (resumePath) {
+    try {
+      const resumeFile = await mediaFromPath(root, path.resolve(root, resumePath))
+      if (resumeFile && !resumeFile.relativePath.startsWith('..')) addScannedFile(resumeFile)
+    } catch {}
+  }
+  void scan(root, generation)
+    .catch(error => app.log.error({ error }, 'Background scan failed'))
+    .finally(() => { if (generation === scanGeneration) scanning = false })
 }
 
 function publicFile(file: MediaFile) {
@@ -166,17 +209,14 @@ app.post<{ Body: { root?: string; restart?: boolean } }>('/api/session', async r
   const details = await stat(root)
   if (!details.isDirectory()) throw httpError(400, 'The source must be a directory')
   sourceRoot = root
-  files = await scan(root)
   const state = await loadState()
-  if (!request.body.restart && state.sourceRoot === root && state.lastPending) {
-    const index = files.findIndex(file => file.relativePath === state.lastPending?.relativePath)
-    if (index > 0) files = [...files.slice(index), ...files.slice(0, index)]
-  }
-  await setPending()
-  return { root, total: files.length, files: files.slice(0, 20).map(publicFile) }
+  const resumePath = !request.body.restart && state.sourceRoot === root ? state.lastPending?.relativePath : undefined
+  await saveState({ ...state, sourceRoot: root, lastPending: resumePath ? { relativePath: resumePath } : undefined })
+  await startProgressiveScan(root, resumePath)
+  return { root, total: files.length, files: files.slice(0, 20).map(publicFile), scanning }
 })
 
-app.get('/api/files', async () => ({ total: files.length, files: files.slice(0, 20).map(publicFile) }))
+app.get('/api/files', async () => ({ total: files.length, files: files.slice(0, 20).map(publicFile), scanning }))
 
 app.get<{ Params: { id: string }; Headers: { range?: string } }>('/api/files/:id/content', async (request, reply) => {
   const file = requireFile(request.params.id)

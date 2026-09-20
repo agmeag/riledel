@@ -1,4 +1,4 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #f4f4f0; background: #0b0d0f; font-synthesis: none; }
+:root { font-family: ui-sans-serif, system-ui, sans-serif; color: #f4f4f0; background: #0b0d0f; font-synthesis: none; }
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input { font: inherit; }
@@ -29,6 +29,7 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .media-card.working { opacity: .7; pointer-events: none; }
 .media-frame { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 22px; background: #171a1b; box-shadow: 0 22px 70px #0008; }
 .media-frame img, .media-frame video { width: 100%; height: 100%; object-fit: contain; display: block; background: #111; }
+.media-frame img { transform-origin: center; will-change: transform; }
 .top-badges { position: absolute; top: 14px; left: 14px; right: 14px; display: flex; gap: 7px; pointer-events: none; }
 .top-badges span { padding: 6px 9px; border-radius: 99px; background: #090b0cd9; backdrop-filter: blur(12px); color: #c9cecb; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
 .top-badges .duplicate { color: #ffcc74; }
@@ -41,16 +42,21 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .intent small { color: #929894; }
 .delete-intent { right: 23px; color: #ff675f; text-align: right; }
 .keep-intent { left: 23px; color: #d5ff40; }
-.tags { display: flex; gap: 7px; overflow-x: auto; padding: 9px 14px 5px; scrollbar-width: none; }
-.tags button { border: 1px solid #2a2f2c; border-radius: 99px; background: #141718; padding: 8px 11px; color: #858b87; font-size: 11px; white-space: nowrap; }
-.tags button.selected { border-color: #d5ff40; background: #273018; color: #e8ff91; }
+.tags { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding: 9px 14px 5px; scrollbar-width: none; }
+.tags > span { position: sticky; left: 0; z-index: 1; padding-right: 3px; background: #0b0d0f; color: #aeb4b0; font-size: 11px; white-space: nowrap; }
+.tags button { min-height: 36px; border: 1px solid #3a403c; border-radius: 99px; background: #181c19; padding: 8px 12px; color: #d6dbd7; font-size: 11px; white-space: nowrap; }
+.tags button:active { border-color: #d5ff40; background: #273018; color: #e8ff91; }
+.tags button:disabled { opacity: .45; }
 .actions { display: flex; justify-content: center; align-items: center; gap: 15px; padding: 8px 15px max(14px, env(safe-area-inset-bottom)); }
 .circle { display: grid; place-items: center; width: 54px; height: 54px; border: 1px solid #2d322f; border-radius: 50%; background: #171a1b; font-size: 26px; }
 .circle.destructive { width: 40px; height: 40px; font-size: 18px; color: #737976; }
 .circle.delete { color: #ff675f; }
 .circle.details { width: 42px; height: 42px; font: 600 17px Georgia; color: #9ba19d; }
 .circle.keep { color: #d5ff40; border-color: #637323; background: #202718; }
-.undo { position: fixed; z-index: 8; left: 50%; bottom: 98px; transform: translateX(-50%); border: 1px solid #424844; border-radius: 11px; padding: 11px 16px; background: #eceee9; color: #151816; box-shadow: 0 10px 30px #0008; }
+.undo { position: fixed; z-index: 12; left: 14px; right: 14px; bottom: max(104px, calc(env(safe-area-inset-bottom) + 88px)); display: flex; justify-content: space-between; align-items: center; min-height: 54px; border: 0; border-radius: 14px; padding: 10px 14px; background: #d5ff40; color: #11150d; box-shadow: 0 16px 38px #000a; }
+.undo strong { font-size: 14px; }
+.undo span { color: #3f491d; font-size: 12px; }
+.zoom-reset { position: absolute; z-index: 3; top: 14px; right: 14px; min-height: 40px; border: 0; border-radius: 99px; padding: 8px 12px; background: #f4f4f0; color: #11150d; font-size: 12px; font-weight: 700; }
 .toast { position: fixed; z-index: 9; top: 65px; left: 14px; right: 14px; border-radius: 12px; padding: 12px 14px; background: #391b1b; box-shadow: 0 12px 35px #0008; }
 .toast button { float: right; border: 0; background: transparent; color: inherit; }
 .sheet-backdrop { position: fixed; z-index: 10; inset: 0; display: flex; align-items: flex-end; background: #0009; backdrop-filter: blur(4px); }
@@ -62,3 +68,4 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .sheet dt { color: #858b87; }
 .sheet dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
 @media (min-width: 700px) { .review { width: 430px; margin: auto; border-inline: 1px solid #242826; } body { background: #050606; } }
+@media (pointer: coarse) { .tags button { min-height: 44px; } }
